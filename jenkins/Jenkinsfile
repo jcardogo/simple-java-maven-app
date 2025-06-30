@@ -3,6 +3,10 @@ pipeline {
     triggers {
         githubPush() // Trigger the pipeline on GitHub push events
     }
+    tools {
+        maven 'Maven 3.9.10' // Specify the Maven version to use for the build
+    }
+    
     parameters {
         choice(name: 'AGENT_LABEL', choices:['local', 'dev', 'QA', 'Staging', 'Production'], description: 'Agent to run the pipeline') // Define the parameter array to choose the agent from
     }
