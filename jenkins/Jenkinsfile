@@ -1,27 +1,33 @@
 pipeline {
-    agent any
+    agent {label params.AGENT_LABEL} // Use the agent label parameter to select the agent
+    triggers {
+        githubPush() // Trigger the pipeline on GitHub push events
+    }
+    parameters {
+        choice(name: 'AGENT_LABEL', choices:['local', 'dev', 'QA', 'Staging', 'Production'], description: 'Agent to run the pipeline') // Define the parameter array to choose the agent from
+
     options {
-        skipStagesAfterUnstable()
+        skipStagesAfterUnstable() // Skip subsequent stages if the build is unstable
     }
     stages {
         stage('Build') {
             steps {
-                sh 'mvn -B -DskipTests clean package'
+                sh 'mvn -B -DskipTests clean package' // Build the Java application using Maven, skipping tests for faster builds
             }
         }
         stage('Test') {
             steps {
-                sh 'mvn test'
+                sh 'mvn test' // Run the tests using Maven
             }
             post {
                 always {
-                    junit 'target/surefire-reports/*.xml'
+                    junit 'target/surefire-reports/*.xml' // Publish the test results
                 }
             }
         }
         stage('Deliver') { 
             steps {
-                sh './jenkins/scripts/deliver.sh' 
+                sh './jenkins/scripts/deliver.sh' // Execute the delivery script to deploy the application
             }
         }
     }
