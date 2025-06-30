@@ -10,6 +10,11 @@ pipeline {
         skipStagesAfterUnstable() // Skip subsequent stages if the build is unstable
     }
     stages {
+        stage('checking maven version') {
+            steps {
+                sh 'mvn -v' // Check the Maven version to ensure it's installed and available
+            }
+        }
         stage('Build') {
             steps {
                 sh 'mvn -B -DskipTests clean package' // Build the Java application using Maven, skipping tests for faster builds
