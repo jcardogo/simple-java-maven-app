@@ -10,20 +10,34 @@ pipeline {
     parameters {
         choice(name: 'AGENT_LABEL', choices:['local', 'dev', 'QA', 'Staging', 'Production'], description: 'Agent to run the pipeline') // Define the parameter array to choose the agent from
     }
+
+    environment {
+        CODEARTIFACT_DOMAIN = 'sandbox' // Your CodeArtifact domain name
+        CODEARTIFACT_REPO = 'acardogo_sandbox' // Your CodeArtifact repository name
+        AWS_REGION = 'us-west-2' // The region your CodeArtifact resources are in
+        AWS_ACCOUNT_ID = '937137607167' // Your AWS account ID
+        // This is the ID of the credentials you stored in Jenkins
+        JENKINS_AWS_CREDENTIALS_ID = 'aws-codeartifact-jenkins-user'
+    }
+
     options {
         skipStagesAfterUnstable() // Skip subsequent stages if the build is unstable
     }
+
     stages {
+        /* Stage removed when the tool was added
         stage('checking maven version') {
             steps {
                 sh 'mvn -v' // Check the Maven version to ensure it's installed and available
             }
         }
+        */
         stage('Build') {
             steps {
                 sh 'mvn -B -DskipTests clean package' // Build the Java application using Maven, skipping tests for faster builds
             }
         }
+    
         stage('Test') {
             steps {
                 sh 'mvn test' // Run the tests using Maven
@@ -34,6 +48,80 @@ pipeline {
                 }
             }
         }
+
+        stage('Deploy to AWS CodeArtifact') {
+            steps {
+                script {
+                    def codeartifactAuthToken
+
+                    // Use withCredentials to expose AWS Access Key ID and Secret Access Key
+                    // as environment variables for the AWS CLI command.
+                    withCredentials([
+                        [$class: 'AmazonWebServicesCredentialsBinding',
+                         credentialsId: env.JENKINS_AWS_CREDENTIALS_ID,
+                         accessKeyVariable: 'AWS_ACCESS_KEY_ID', // These variable names are standard for AWS CLI
+                         secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']
+                    ]) {
+                        // The AWS CLI command will now find the credentials from the environment variables
+                        codeartifactAuthToken = sh(
+                            script: "aws codeartifact get-authorization-token --domain ${env.CODEARTIFACT_DOMAIN} --query authorizationToken --output text --region ${env.AWS_REGION}",
+                            returnStdout: true
+                        ).trim()
+                    }
+
+                    // Configure Maven settings.xml on the fly with the token
+                    withMaven(mavenSettings: [
+                        id: 'codeartifact-settings',
+                        content: """
+                            <settings>
+                            <servers>
+                                <server>
+                                <id>sandbox-acardogo_sandbox</id> <username>aws</username>
+                                <password>${codeartifactAuthToken}</password>
+                                </server>
+                            </servers>
+                            <mirrors>
+                                <mirror>
+                                <id>codeartifact-mirror</id>
+                                <name>CodeArtifact Maven Mirror</name>
+                                <url>https://${env.CODEARTIFACT_DOMAIN}-${env.AWS_ACCOUNT_ID}.d.codeartifact.${env.AWS_REGION}.amazonaws.com/maven/${env.CODEARTIFACT_REPO}/</url>
+                                <mirrorOf>*</mirrorOf>
+                                </mirror>
+                            </mirrors>
+                            <profiles>
+                                <profile>
+                                <id>default-codeartifact</id>
+                                <repositories>
+                                    <repository>
+                                    <id>central</id>
+                                    <url>https://${env.CODEARTIFACT_DOMAIN}-${env.AWS_ACCOUNT_ID}.d.codeartifact.${env.AWS_REGION}.amazonaws.com/maven/${env.CODEARTIFACT_REPO}/</url>
+                                    <releases><enabled>true</enabled></releases>
+                                    <snapshots><enabled>true</enabled></snapshots>
+                                    </repository>
+                                </repositories>
+                                <pluginRepositories>
+                                    <pluginRepository>
+                                    <id>central</id>
+                                    <url>https://${env.CODEARTIFACT_DOMAIN}-${env.AWS_ACCOUNT_ID}.d.codeartifact.${env.AWS_REGION}.amazonaws.com/maven/${env.CODEARTIFACT_REPO}/</url>
+                                    <releases><enabled>true</enabled></releases>
+                                    <snapshots><enabled>true</enabled></snapshots>
+                                    </pluginRepository>
+                                </pluginRepositories>
+                                </profile>
+                            </profiles>
+                            <activeProfiles>
+                                <activeProfile>default-codeartifact</activeProfile>
+                            </activeProfiles>
+                            </settings>
+                                                    """
+                    ]) {
+                        sh "mvn --settings ./maven-settings.xml deploy"
+                    }
+                }
+            }
+        }
+
+
         stage('Deliver') { 
             steps {
                 sh './jenkins/scripts/deliver.sh' // Execute the delivery script to deploy the application
